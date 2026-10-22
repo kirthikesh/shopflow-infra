@@ -1,0 +1,66 @@
+# Tools the jump box and pipeline agent need: Azure CLI, Terraform, kubectl, kubelogin, Helm, Docker.
+# Packages come from each vendor's signed apt repository.
+
+- name: Create apt keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Add signing keys
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "/etc/apt/keyrings/{{ item.name }}.asc"
+    mode: "0644"
+  loop: "{{ devtools_repos }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Add apt repositories
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/{{ item.name }}.asc] {{ item.repo }}"
+    filename: "{{ item.name }}"
+    state: present
+  loop: "{{ devtools_repos }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Install Azure CLI, Terraform and Docker
+  ansible.builtin.apt:
+    name: [azure-cli, terraform, docker.io]
+    state: present
+    update_cache: true
+
+- name: Install kubectl and kubelogin
+  ansible.builtin.command:
+    cmd: az aks install-cli --install-location /usr/local/bin/kubectl --kubelogin-install-location /usr/local/bin/kubelogin
+    creates: /usr/local/bin/kubelogin
+
+- name: Install Helm
+  community.general.snap:
+    name: helm
+    classic: true
+
+- name: Enable Docker
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Report installed versions
+  ansible.builtin.shell: |
+    set -o pipefail
+    echo "az        $(az version --query '"azure-cli"' -o tsv)"
+    echo "terraform $(terraform version -json | jq -r .terraform_version)"
+    echo "kubectl   $(kubectl version --client -o json | jq -r .clientVersion.gitVersion)"
+    echo "kubelogin $(kubelogin --version | grep -oE "v[0-9]+\.[0-9]+\.[0-9]+" | head -1)"
+    echo "helm      $(helm version --short)"
+    echo "docker    $(docker --version)"
+  args:
+    executable: /bin/bash
+  register: devtools_versions
+  changed_when: false
+
+- name: Show versions
+  ansible.builtin.debug:
+    var: devtools_versions.stdout_lines

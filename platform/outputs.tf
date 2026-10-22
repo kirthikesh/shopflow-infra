@@ -42,3 +42,7 @@ output "acr_id" {
 output "acr_login_server" {
   value = module.container_registry.login_server
 }
+
+output "management_nsg_name" {
+  value = module.hub_network.management_nsg_name
+}

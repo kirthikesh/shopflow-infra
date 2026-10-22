@@ -17,3 +17,7 @@ output "subnet_ids" {
     private_endpoints = azurerm_subnet.private_endpoints.id
   }
 }
+
+output "management_nsg_name" {
+  value = azurerm_network_security_group.management.name
+}

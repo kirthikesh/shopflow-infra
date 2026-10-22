@@ -10,7 +10,7 @@ an event-driven microservices store. Hub-and-spoke networking, private DNS, a co
 centralised logging, and cost and policy guardrails, built as small reusable modules in separate,
 independently deployable layers.
 
-> **Status:** Phase 2 (landing zone). Phase 3 adds a private AKS cluster to the dev spoke.
+> **Status:** Phases 2–3 done: landing zone, AKS and Service Bus. `make aks-down` / `make aks-up` switch the paid compute off and on.
 
 ---
 
@@ -87,6 +87,28 @@ make up                         # recreates both
 Other commands: `make validate` (format check and validate every layer, no Azure access needed),
 `make dev-plan`, `make help`.
 
+## Jump box and Ansible
+
+`management/` creates a Linux VM in the hub's management subnet; `ansible/` configures it. The same VM is the
+**Azure DevOps self-hosted agent**, so pipelines run inside the private network.
+
+| Role | What it does |
+|---|---|
+| `common` | Package updates, base tools, timezone, unattended security upgrades |
+| `hardening` | SSH: keys only, no root, `AllowUsers`, validated with `sshd -t` before reload. ufw (deny all, rate-limited SSH), fail2ban, auditd, kernel sysctl hardening |
+| `devtools` | Azure CLI, Terraform, kubectl, kubelogin, Helm, Docker, from vendor-signed apt repositories |
+| `ado_agent` | Dedicated `azdo` user, agent version fetched from the org's API, registered unattended, runs under systemd. The PAT is only used to register and is revoked afterwards |
+
+```bash
+make jumpbox-up        # VM with SSH open to your IP only; auto-shutdown at 22:00
+make ansible           # idempotent: a second run reports changed=0
+ADO_ORG_URL=... ADO_PAT=... make ansible   # also registers the agent
+make jumpbox-ssh
+make jumpbox-down
+```
+
+The playbook passes `ansible-lint` at the **production** profile.
+
 ## Cost
 
 Defaults are chosen to keep an idle landing zone at a few euros a month.
@@ -118,10 +140,16 @@ The budget alert emails at 50%, 80% and 100% of the monthly amount, and when the
 
 | Problem | Cause | Fix |
 |---|---|---|
+| Ansible: `'timezone' is undefined` | `group_vars/` sat in the project root; Ansible only loads it next to the inventory or playbook (ansible-lint doesn't catch this) | Moved it to `ansible/inventory/group_vars/` |
+| Azure DevOps API returned **203** with a sign-in page | `uri` with `user: ""` silently skips Basic auth, so the PAT was never sent | Built the `Authorization: Basic` header explicitly; isolated it by testing the token with `curl` first (200) |
+| Azure DevOps sign-in kept failing (404/500) | Browser session confusion with a personal Microsoft account across directories | Created the organisation from a clean Incognito session |
 | `AADSTS530035: Access has been blocked by security defaults` when Terraform read state | Security Defaults require MFA, and data-plane endpoints (Blob Storage, Key Vault) each need their own MFA-backed token | Re-authenticated per resource: `az login --scope https://storage.azure.com/.default`, and the same for `https://vault.azure.net` |
 | Key Vault create timed out after 12 minutes on `GetCertificateContacts` | The vault was created through ARM, but the provider's follow-up read goes to the vault's data plane, which had no valid token | Logged in with the Key Vault scope; Terraform replaced the half-created vault cleanly on the next apply |
 | `Invalid count argument` on diagnostic settings | `count = workspace_id == null ? 0 : 1` depends on an ID that only exists after apply | Replaced with an explicit `enable_diagnostics` boolean, which is known at plan time |
 | `private_dns_zone_name` not accepted on DNS zone links | AzureRM 5.x links zones by ID instead of name and resource group | Switched to `private_dns_zone_id`, caught by `terraform validate` before anything was deployed |
+| AKS create rejected: `Standard_D2s_v5 is not allowed in your subscription` | New pay-as-you-go subscriptions are limited to certain VM SKUs per region, separate from vCPU quota | Compared the allowed-SKU list with `az vm list-usage` quotas and chose `Standard_EC2ads_v5`, the cheapest size that was both allowed and had quota. The size is a variable, so no module change was needed |
+| `az vm list-usage` returned nothing | `Microsoft.Compute` wasn't registered on the subscription | Registered it, and added it to the dev layer's explicit provider list |
+| `TasksOperationsNotAllowed` from `az acr build` | ACR Tasks (cloud builds) are disabled for new subscriptions | Built with `docker buildx --platform linux/amd64` on an ARM Mac and pushed with `az acr login`; the cloud build path stays in the Makefile for when it's enabled |
 | Apply looked frozen with no output | A fresh subscription registers each resource provider on first use, which takes minutes | Pre-registered providers with `az provider register --wait`, and declared them explicitly in each layer |
 
 ## Repository layout
@@ -149,7 +177,9 @@ shopflow-infra/
 - [x] Remote state with Entra ID auth
 - [x] Hub-and-spoke network, private DNS, ACR, Log Analytics
 - [x] Budget alerts and policy guardrails
-- [ ] Private AKS cluster with Workload Identity (Phase 3)
-- [ ] Ansible-managed jump box and build agents (Phase 4)
+- [x] AKS with Workload Identity, Entra ID RBAC, Cilium overlay, Container Insights (Phase 3)
+- [x] Azure Service Bus Standard for the order flow (Phase 3)
+- [ ] Make the AKS API fully private once the jump box exists (Phase 4)
+- [x] Ansible-managed jump box and Azure DevOps self-hosted agent (Phase 4)
 - [ ] Azure DevOps pipeline: `plan` on pull request, approval before `apply` (Phase 5)
 - [ ] Prod spoke (`envs/prod`, 10.20.0.0/16)

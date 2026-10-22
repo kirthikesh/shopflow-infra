@@ -1,0 +1,82 @@
+# Registers this VM as an Azure DevOps self-hosted agent, running as its own
+# unprivileged user under systemd. The PAT is only used to register; the agent
+# then authenticates with its own credentials, so the PAT can be revoked afterwards.
+
+- name: Check the PAT was provided
+  ansible.builtin.assert:
+    that: ado_pat | length > 0
+    fail_msg: "Set ADO_PAT (a PAT with 'Agent Pools: Read & manage' scope)."
+    quiet: true
+
+- name: Create the agent user
+  ansible.builtin.user:
+    name: "{{ ado_agent_user }}"
+    shell: /bin/bash
+    groups: [docker] # pipelines build container images
+    append: true
+    create_home: true
+
+- name: Create the agent directory
+  ansible.builtin.file:
+    path: "{{ ado_agent_dir }}"
+    state: directory
+    owner: "{{ ado_agent_user }}"
+    group: "{{ ado_agent_user }}"
+    mode: "0750"
+
+- name: Ask Azure DevOps for the current Linux agent package
+  ansible.builtin.uri:
+    url: "{{ ado_org_url | regex_replace('/$', '') }}/_apis/distributedtask/packages/agent?platform=linux-x64&$top=1&api-version=7.1"
+    # PATs use Basic auth with an empty username. Ansible skips auth when the
+    # username is empty, so build the header ourselves.
+    headers:
+      Authorization: "Basic {{ (':' ~ ado_pat) | b64encode }}"
+      Accept: application/json
+    follow_redirects: none
+    status_code: 200
+    return_content: true
+  register: ado_agent_package
+  no_log: true
+
+- name: Download and unpack the agent
+  ansible.builtin.unarchive:
+    src: "{{ ado_agent_package.json.value[0].downloadUrl }}"
+    dest: "{{ ado_agent_dir }}"
+    remote_src: true
+    owner: "{{ ado_agent_user }}"
+    group: "{{ ado_agent_user }}"
+    creates: "{{ ado_agent_dir }}/config.sh"
+
+- name: Install the agent's OS dependencies (once)
+  ansible.builtin.shell:
+    cmd: ./bin/installdependencies.sh && touch .deps-installed
+    chdir: "{{ ado_agent_dir }}"
+    creates: "{{ ado_agent_dir }}/.deps-installed"
+
+- name: Register the agent with Azure DevOps
+  ansible.builtin.command:
+    cmd: >-
+      ./config.sh --unattended --acceptTeeEula --replace
+      --url {{ ado_org_url }}
+      --auth pat --token {{ ado_pat }}
+      --pool {{ ado_pool }}
+      --agent {{ ado_agent_name }}
+      --work _work
+    chdir: "{{ ado_agent_dir }}"
+    creates: "{{ ado_agent_dir }}/.agent"
+  become: true
+  become_user: "{{ ado_agent_user }}"
+  no_log: true
+
+- name: Install the agent as a systemd service
+  ansible.builtin.command:
+    cmd: ./svc.sh install {{ ado_agent_user }}
+    chdir: "{{ ado_agent_dir }}"
+    creates: "{{ ado_agent_dir }}/.service"
+
+- name: Start the agent service
+  ansible.builtin.command:
+    cmd: ./svc.sh start
+    chdir: "{{ ado_agent_dir }}"
+  register: ado_agent_start
+  changed_when: "'active (running)' not in ado_agent_start.stdout"

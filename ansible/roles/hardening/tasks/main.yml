@@ -1,0 +1,56 @@
+# CIS-style baseline: SSH, firewall, brute-force protection, kernel settings, audit logging.
+
+- name: Harden SSH
+  ansible.builtin.template:
+    src: sshd-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-shopflow-hardening.conf
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Validate and reload sshd
+
+- name: Install security packages
+  ansible.builtin.apt:
+    name: [ufw, fail2ban, auditd]
+    state: present
+
+- name: Firewall - allow SSH
+  community.general.ufw:
+    rule: limit # rate-limits repeated connections from one address
+    port: "22"
+    proto: tcp
+
+- name: Firewall - deny all other inbound, enable
+  community.general.ufw:
+    state: enabled
+    default: deny
+    direction: incoming
+
+- name: Configure fail2ban for SSH
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/sshd.local
+    content: |
+      [sshd]
+      enabled  = true
+      maxretry = 5
+      findtime = 10m
+      bantime  = 1h
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: Kernel network and memory hardening
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/90-shopflow-hardening.conf
+    reload: true
+  loop: "{{ hardening_sysctl | dict2items }}"
+
+- name: Enable fail2ban and auditd
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop: [fail2ban, auditd]

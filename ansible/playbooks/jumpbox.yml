@@ -1,0 +1,14 @@
+# Configure the jump box / build agent. Safe to run again at any time (idempotent).
+#   make ansible                         (base, hardening, tools)
+#   ADO_ORG_URL=... ADO_PAT=... make ansible   (also registers the Azure DevOps agent)
+- name: Configure jump box
+  hosts: jumpbox
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: common
+    - role: hardening
+    - role: devtools
+    - role: ado_agent
+      when: ado_org_url | length > 0

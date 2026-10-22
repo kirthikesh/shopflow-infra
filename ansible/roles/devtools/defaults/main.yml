@@ -1,0 +1,7 @@
+devtools_repos:
+  - name: microsoft
+    url: https://packages.microsoft.com/keys/microsoft.asc
+    repo: "https://packages.microsoft.com/repos/azure-cli/ {{ ansible_facts['distribution_release'] }} main"
+  - name: hashicorp
+    url: https://apt.releases.hashicorp.com/gpg
+    repo: "https://apt.releases.hashicorp.com {{ ansible_facts['distribution_release'] }} main"

@@ -1,0 +1,8 @@
+admin_user: shopflow
+timezone: Europe/Dublin
+
+# Azure DevOps agent (Phase 5). Leave ado_org_url empty to skip the agent role.
+ado_org_url: "{{ lookup('env', 'ADO_ORG_URL') }}"
+ado_pat: "{{ lookup('env', 'ADO_PAT') }}"
+ado_pool: Default
+ado_agent_name: "{{ inventory_hostname }}"
