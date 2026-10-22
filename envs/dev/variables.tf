@@ -20,6 +20,29 @@ variable "enable_private_endpoints" {
   default     = false
 }
 
+variable "aks_enabled" {
+  description = "Create the AKS cluster and Service Bus. false tears down just those (they are what costs money)."
+  type        = bool
+  default     = true
+}
+
+variable "aks_node_vm_size" {
+  type    = string
+  default = "Standard_D2s_v5"
+}
+
+variable "aks_api_server_private" {
+  description = "Phase 3: false (public API locked to your IP). Phase 4 switches to true once the jump box exists."
+  type        = bool
+  default     = false
+}
+
+variable "aks_api_server_authorized_ip_ranges" {
+  description = "Your public IP as a /32. The Makefile fills this in automatically."
+  type        = list(string)
+  default     = []
+}
+
 variable "owner" {
   type    = string
   default = "kirthikesh"

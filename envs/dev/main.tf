@@ -1,5 +1,6 @@
-# Dev environment: a spoke VNet peered to the hub, and the environment's Key Vault.
-# Phase 3 adds the private AKS cluster to this layer.
+# Dev environment: a spoke VNet peered to the hub, the environment's Key Vault,
+# and (when aks_enabled = true) the AKS cluster and Service Bus namespace.
+# The last two are the expensive parts, so `make aks-down` switches just them off.
 
 data "terraform_remote_state" "platform" {
   backend = "azurerm"
@@ -76,4 +77,32 @@ module "key_vault" {
   log_analytics_workspace_id = local.platform.log_analytics_workspace_id
   enable_diagnostics         = true
   tags                       = local.tags
+}
+
+# ---- Phase 3: compute and messaging (switchable to save money) ----------
+
+module "aks" {
+  source = "../../modules/aks"
+  count  = var.aks_enabled ? 1 : 0
+
+  name                            = "aks-${local.name_prefix}-${var.environment}-${var.location_short}"
+  location                        = local.location
+  resource_group_name             = azurerm_resource_group.env.name
+  node_subnet_id                  = module.spoke_network.subnet_ids.aks_nodes
+  node_vm_size                    = var.aks_node_vm_size
+  api_server_private              = var.aks_api_server_private
+  api_server_authorized_ip_ranges = var.aks_api_server_authorized_ip_ranges
+  acr_id                          = local.platform.acr_id
+  log_analytics_workspace_id      = local.platform.log_analytics_workspace_id
+  tags                            = local.tags
+}
+
+module "service_bus" {
+  source = "../../modules/service-bus"
+  count  = var.aks_enabled ? 1 : 0
+
+  name                = "sb-${local.name_prefix}-${var.environment}-${random_string.suffix.result}"
+  location            = local.location
+  resource_group_name = azurerm_resource_group.env.name
+  tags                = local.tags
 }

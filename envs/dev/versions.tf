@@ -30,5 +30,10 @@ provider "azurerm" {
     "Microsoft.Network",
     "Microsoft.KeyVault",
     "Microsoft.Insights",
+    "Microsoft.ContainerService",
+    "Microsoft.ManagedIdentity",
+    "Microsoft.OperationalInsights",
+    "Microsoft.OperationsManagement",
+    "Microsoft.ServiceBus",
   ]
 }

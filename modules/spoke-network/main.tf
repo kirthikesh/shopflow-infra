@@ -73,3 +73,19 @@ resource "azurerm_virtual_network_peering" "hub_to_spoke" {
   remote_virtual_network_id = azurerm_virtual_network.spoke.id
   allow_forwarded_traffic   = true
 }
+
+# Let web traffic reach services exposed through the cluster's public load balancer.
+# Only 80/443, only into the AKS node subnet; everything else stays denied by default.
+resource "azurerm_network_security_rule" "aks_web_inbound" {
+  name                        = "allow-web-inbound"
+  priority                    = 100
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_ranges     = ["80", "443"]
+  source_address_prefix       = "Internet"
+  destination_address_prefix  = "*"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.this["aks-nodes"].name
+}

@@ -9,6 +9,10 @@ SHELL := /bin/bash
 # AzureRM 4+ needs the subscription ID explicitly; take it from your `az login`.
 export ARM_SUBSCRIPTION_ID ?= $(shell az account show --query id -o tsv 2>/dev/null)
 
+# Your public IP, so only you can reach the AKS API server while it's public.
+MY_IP := $(shell curl -s --max-time 5 https://api.ipify.org)
+export TF_VAR_aks_api_server_authorized_ip_ranges := ["$(MY_IP)/32"]
+
 BACKEND    := $(CURDIR)/generated/backend.hcl
 STATE_VARS := $(CURDIR)/generated/state.tfvars.json
 TF_DIRS    := bootstrap platform envs/dev
@@ -16,6 +20,7 @@ TF_DIRS    := bootstrap platform envs/dev
 .PHONY: help check bootstrap \
         platform-init platform-plan platform-apply platform-destroy \
         dev-init dev-plan dev-apply dev-destroy \
+        aks-up aks-down aks-creds \
         up down fmt validate
 
 help: ## Show this help
@@ -64,6 +69,20 @@ dev-apply: dev-init ## Create or update the dev environment
 
 dev-destroy: dev-init ## Destroy the dev environment
 	terraform -chdir=envs/dev destroy -var-file=$(STATE_VARS)
+
+# ---- AKS on/off (the expensive part) -----------------------------------
+
+aks-up: dev-apply ## Create AKS and Service Bus (part of the dev layer)
+
+aks-down: dev-init ## Delete only AKS and Service Bus; keep network, Key Vault, ACR
+	terraform -chdir=envs/dev apply -var-file=$(STATE_VARS) -var aks_enabled=false
+
+aks-creds: ## Point kubectl at the cluster (Entra ID login via kubelogin)
+	@name=$$(terraform -chdir=envs/dev output -raw aks_name) && \
+	rg=$$(terraform -chdir=envs/dev output -raw resource_group_name) && \
+	az aks get-credentials --resource-group $$rg --name $$name --overwrite-existing && \
+	kubelogin convert-kubeconfig -l azurecli && \
+	kubectl get nodes
 
 # ---- everything ----------------------------------------------------------
 
