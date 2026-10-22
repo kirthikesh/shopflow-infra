@@ -64,6 +64,13 @@ resource "azurerm_network_security_group" "management" {
     source_address_prefix      = "Internet"
     destination_address_prefix = "*"
   }
+
+  # The management layer adds "allow-ssh-from-admin" to this NSG as a separate
+  # rule resource. Without this, every platform apply would delete that rule and
+  # lock the admin out of the jump box. The rules above are applied at creation.
+  lifecycle {
+    ignore_changes = [security_rule]
+  }
 }
 
 resource "azurerm_subnet_network_security_group_association" "management" {
