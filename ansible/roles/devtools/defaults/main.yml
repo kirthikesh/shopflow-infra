@@ -5,3 +5,11 @@ devtools_repos:
   - name: hashicorp
     url: https://apt.releases.hashicorp.com/gpg
     repo: "https://apt.releases.hashicorp.com {{ ansible_facts['distribution_release'] }} main"
+  - name: trivy
+    url: https://aquasecurity.github.io/trivy-repo/deb/public.key
+    repo: "https://aquasecurity.github.io/trivy-repo/deb generic main"
+
+# Pinned on purpose: Trivy release 0.69.4 was a supply-chain compromise
+# (CVE-2026-33634). Scanners are upgraded deliberately, not automatically.
+devtools_trivy_version: 0.76.1
+devtools_kustomize_version: 5.8.3

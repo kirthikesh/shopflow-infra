@@ -27,8 +27,9 @@ variable "aks_enabled" {
 }
 
 variable "aks_node_vm_size" {
-  type    = string
-  default = "Standard_D2s_v5"
+  description = "New subscriptions only allow some sizes per region; this one was allowed and had quota (see README)."
+  type        = string
+  default     = "Standard_EC2ads_v5"
 }
 
 variable "aks_api_server_private" {
@@ -38,9 +39,19 @@ variable "aks_api_server_private" {
 }
 
 variable "aks_api_server_authorized_ip_ranges" {
-  description = "Your public IP as a /32. The Makefile fills this in automatically."
+  description = "Who can reach the AKS API: your IP and the pipeline agent's. Written by scripts/access-vars.sh."
   type        = list(string)
   default     = []
+}
+
+variable "admin_object_ids" {
+  description = "Cluster and Key Vault admins keyed by role: owner (you) and pipeline (the agent). Written by scripts/access-vars.sh."
+  type        = map(string)
+
+  validation {
+    condition     = contains(keys(var.admin_object_ids), "owner")
+    error_message = "admin_object_ids needs an \"owner\" entry, or you would lock yourself out of the cluster."
+  }
 }
 
 variable "owner" {

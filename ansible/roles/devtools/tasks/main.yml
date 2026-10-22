@@ -1,5 +1,6 @@
-# Tools the jump box and pipeline agent need: Azure CLI, Terraform, kubectl, kubelogin, Helm, Docker.
-# Packages come from each vendor's signed apt repository.
+# Tools the jump box and pipeline agent need: Azure CLI, Terraform, kubectl, kubelogin,
+# kustomize, Helm, Docker and Trivy.
+# Packages come from each vendor's signed apt repository; kustomize from its checksum-verified release.
 
 - name: Create apt keyring directory
   ansible.builtin.file:
@@ -25,9 +26,16 @@
   loop_control:
     label: "{{ item.name }}"
 
-- name: Install Azure CLI, Terraform and Docker
+- name: Install Azure CLI, Terraform, Docker and pipeline tools
   ansible.builtin.apt:
-    name: [azure-cli, terraform, docker.io]
+    name:
+      - azure-cli
+      - terraform
+      - docker.io
+      - docker-buildx
+      - "trivy={{ devtools_trivy_version }}"
+      - python3-venv # ansible-lint in the pipeline
+      - jq
     state: present
     update_cache: true
 
@@ -35,6 +43,24 @@
   ansible.builtin.command:
     cmd: az aks install-cli --install-location /usr/local/bin/kubectl --kubelogin-install-location /usr/local/bin/kubelogin
     creates: /usr/local/bin/kubelogin
+
+- name: Download kustomize (checksum verified)
+  ansible.builtin.get_url:
+    url: "{{ devtools_kustomize_base }}/kustomize_v{{ devtools_kustomize_version }}_linux_amd64.tar.gz"
+    checksum: "sha256:{{ devtools_kustomize_base }}/checksums.txt"
+    dest: /tmp/kustomize.tar.gz
+    mode: "0644"
+  vars:
+    devtools_kustomize_base: "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv{{ devtools_kustomize_version }}"
+
+- name: Install kustomize
+  ansible.builtin.unarchive:
+    src: /tmp/kustomize.tar.gz
+    dest: /usr/local/bin
+    remote_src: true
+    include: [kustomize]
+    mode: "0755"
+    creates: /usr/local/bin/kustomize
 
 - name: Install Helm
   community.general.snap:
@@ -56,6 +82,8 @@
     echo "kubelogin $(kubelogin --version | grep -oE "v[0-9]+\.[0-9]+\.[0-9]+" | head -1)"
     echo "helm      $(helm version --short)"
     echo "docker    $(docker --version)"
+    echo "trivy     $(trivy --version | head -1)"
+    echo "kustomize $(kustomize version)"
   args:
     executable: /bin/bash
   register: devtools_versions

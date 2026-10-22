@@ -56,3 +56,8 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "admin_object_ids" {
+  description = "Entra ID object IDs that administer this resource, keyed by role, e.g. { owner = \"...\", pipeline = \"...\" }."
+  type        = map(string)
+}

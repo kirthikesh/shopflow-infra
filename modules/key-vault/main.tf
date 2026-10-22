@@ -28,11 +28,18 @@ resource "azurerm_key_vault" "this" {
   tags = var.tags
 }
 
-# The person (or pipeline) running Terraform can manage secrets in this vault.
-resource "azurerm_role_assignment" "deployer_secrets_officer" {
+# Who can manage secrets in this vault, keyed by role ("owner", "pipeline").
+resource "azurerm_role_assignment" "secrets_officer" {
+  for_each = var.admin_object_ids
+
   scope                = azurerm_key_vault.this.id
   role_definition_name = "Key Vault Secrets Officer"
-  principal_id         = data.azurerm_client_config.current.object_id
+  principal_id         = each.value
+}
+
+moved {
+  from = azurerm_role_assignment.deployer_secrets_officer
+  to   = azurerm_role_assignment.secrets_officer["owner"]
 }
 
 resource "azurerm_private_endpoint" "this" {

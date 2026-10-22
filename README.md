@@ -4,13 +4,15 @@
 ![AzureRM](https://img.shields.io/badge/AzureRM-5.x-111?style=flat-square&logo=microsoftazure&logoColor=white)
 ![Region](https://img.shields.io/badge/Region-North_Europe-111?style=flat-square)
 ![State](https://img.shields.io/badge/State-Azure_Blob_+_Entra_ID-111?style=flat-square)
+![Azure DevOps](https://img.shields.io/badge/Azure_DevOps-Pipelines-111?style=flat-square&logo=azuredevops&logoColor=white)
+![Ansible](https://img.shields.io/badge/Ansible-production_lint-111?style=flat-square&logo=ansible&logoColor=white)
 
 Terraform for the Azure landing zone that runs [ShopFlow](https://github.com/kirthikesh/shopflow-app),
 an event-driven microservices store. Hub-and-spoke networking, private DNS, a container registry,
 centralised logging, and cost and policy guardrails, built as small reusable modules in separate,
 independently deployable layers.
 
-> **Status:** Phases 2–3 done: landing zone, AKS and Service Bus. `make aks-down` / `make aks-up` switch the paid compute off and on.
+> **Status:** Phases 2–5 done: landing zone, AKS and Service Bus, an Ansible-managed build agent, and Azure DevOps pipelines that plan on pull requests and apply after approval. `make aks-down` / `make aks-up` switch the paid compute off and on.
 
 ---
 
@@ -46,7 +48,8 @@ Each layer has its own state file, so a change to dev can never touch shared res
 |---|---|---|
 | `bootstrap/` | local | Storage account for remote state: Entra ID auth only, versioning, soft delete, delete lock |
 | `platform/` | `platform.tfstate` | Hub VNet and NSGs, private DNS zones, ACR, Log Analytics, budget alerts, policy assignments |
-| `envs/dev/` | `envs/dev.tfstate` | Spoke VNet peered to the hub, DNS links, Key Vault with RBAC and audit logging |
+| `envs/dev/` | `envs/dev.tfstate` | Spoke VNet peered to the hub, DNS links, Key Vault, AKS and Service Bus (switchable) |
+| `management/` | `management.tfstate` | Jump box / pipeline agent VM in the hub, and the agent identity's Azure roles |
 
 `envs/dev` reads the platform layer's outputs through `terraform_remote_state`, so nothing is copied by hand.
 
@@ -62,6 +65,9 @@ Each layer has its own state file, so a change to dev can never touch shared res
 | `log-analytics` | Workspace with retention and a daily ingestion cap |
 | `budget` | Monthly budget with 50/80/100% actual and 100% forecast alerts |
 | `policy-baseline` | Built-in Azure Policy: allowed locations (deny), resource group tag (audit) |
+| `aks` | AKS with CNI Overlay + Cilium, Workload Identity, Entra ID RBAC (no local accounts), Container Insights, Key Vault CSI driver |
+| `service-bus` | Standard namespace: `order-created` queue, `payment-events` topic, duplicate detection, dead-lettering |
+| `jumpbox` | Ubuntu VM with managed identity, static IP, SSH keys only, nightly auto-shutdown |
 
 ## Run it
 
@@ -109,6 +115,53 @@ make jumpbox-down
 
 The playbook passes `ansible-lint` at the **production** profile.
 
+## Pipeline
+
+[`.azure-pipelines/infra.yml`](.azure-pipelines/infra.yml) runs in Azure DevOps on the jump box's agent.
+
+```mermaid
+flowchart LR
+    PR([pull request]) --> V
+    MAIN([push to main]) --> V
+    V[Validate<br/>fmt · validate · ansible-lint<br/>Trivy IaC scan] --> P[Plan<br/>platform, then dev<br/>saved plans + summary]
+    P -->|main only| A{Approval<br/>shopflow-infra}
+    A --> AP[Apply platform] --> AD[Apply dev]
+```
+
+- **Pull requests only plan.** The plan for each layer appears on the run's Summary tab.
+- **Apply runs the saved plan**, so what gets applied is exactly what was approved. A layer with no changes skips its apply and never asks for approval.
+- **Trivy scans the Terraform.** Any HIGH or CRITICAL misconfiguration fails the build; the two accepted ones are listed with reasons in [`.trivyignore.yaml`](.trivyignore.yaml).
+- **AKS on or off from the Run button.** The `aks` parameter is `keep` (default), `on` or `off`.
+- **Same inputs as the laptop.** The pipeline and `make` both build the AKS allow-list and the admin list with [`scripts/access-vars.sh`](scripts/access-vars.sh), so a laptop apply and a pipeline apply never undo each other.
+
+### How the pipeline authenticates
+
+There is **no service principal and no secret**. The agent VM has a system-assigned managed identity,
+and every job runs `az login --identity`; Terraform uses the same identity (`ARM_USE_MSI`).
+Azure DevOps stores no Azure credential at all.
+
+The `management/` layer grants that identity:
+
+| Role | Scope | Why |
+|---|---|---|
+| Contributor | Subscription | Create and change resources |
+| Role Based Access Control Administrator, **constrained** | Subscription | Can assign or remove only AcrPull, Network Contributor, AKS RBAC Cluster Admin and Key Vault Secrets Officer, the four roles the modules hand out. It cannot make anyone Owner, itself included |
+| Resource Policy Contributor | Subscription | The policy baseline |
+| Storage Blob Data Contributor | State account | Read and write Terraform state |
+| AcrPush | Registry | The app pipeline pushes images |
+
+The pipeline covers `platform/` and `envs/dev/`. It does not touch `bootstrap/` (the state account it
+depends on) or `management/` (the VM it runs on).
+
+### Set it up
+
+1. `make jumpbox-up` applies the roles above, then `make ansible` installs Trivy, kustomize and buildx.
+2. In Azure DevOps, **Pipelines → Library**: create the variable group `shopflow-infra` with
+   `STATE_STORAGE_ACCOUNT`, `BUDGET_EMAIL`, `OWNER_OBJECT_ID` (`az ad signed-in-user show --query id -o tsv`)
+   and `ADMIN_IP` (your public IP).
+3. **Pipelines → Environments**: create `shopflow-infra` and add an **Approvals** check.
+4. **Pipelines → New pipeline → GitHub**, choose this repo and the existing file `.azure-pipelines/infra.yml`.
+
 ## Cost
 
 Defaults are chosen to keep an idle landing zone at a few euros a month.
@@ -134,6 +187,8 @@ The budget alert emails at 50%, 80% and 100% of the monthly amount, and when the
 - **Private endpoints behind a flag.** The modules support them fully, with DNS zones already in place. They're off by default because they need something inside the VNet (the Phase 4 jump box or the Phase 3 cluster) to be useful, and ACR's needs the Premium SKU.
 - **AzureRM 5.x.** Resource providers are registered explicitly per layer, since 5.x no longer registers them automatically.
 - **Guardrails from day one.** A budget and region policy exist before any workload does.
+- **The build agent is the only credential.** Pipelines authenticate as the agent VM's managed identity, so there is no secret to leak or rotate. The identity's power is limited by constrained role delegation, and every apply needs a human approval.
+- **A pipeline can't destroy its own runner.** The agent VM lives in its own layer, which only a person applies.
 - **Tag policy in audit mode.** Azure creates some resource groups itself (Network Watcher, the AKS node group) without our tags, so denying untagged groups would break those.
 
 ## Problems I hit, and how I fixed them
@@ -157,10 +212,15 @@ The budget alert emails at 50%, 80% and 100% of the monthly amount, and when the
 ```
 shopflow-infra/
 ├── Makefile
+├── .azure-pipelines/   infra pipeline and templates
+├── .trivyignore.yaml   accepted scan findings, with reasons
+├── scripts/            access-vars.sh (shared by make and the pipeline)
+├── ansible/            jump box / agent configuration
 ├── bootstrap/          remote state storage (local state)
 ├── platform/           shared hub layer
 ├── envs/
 │   └── dev/            dev spoke layer
+├── management/         jump box / agent VM and its roles
 └── modules/
     ├── hub-network/
     ├── spoke-network/
@@ -169,7 +229,10 @@ shopflow-infra/
     ├── key-vault/
     ├── log-analytics/
     ├── budget/
-    └── policy-baseline/
+    ├── policy-baseline/
+    ├── aks/
+    ├── service-bus/
+    └── jumpbox/
 ```
 
 ## Roadmap
@@ -181,5 +244,5 @@ shopflow-infra/
 - [x] Azure Service Bus Standard for the order flow (Phase 3)
 - [ ] Make the AKS API fully private once the jump box exists (Phase 4)
 - [x] Ansible-managed jump box and Azure DevOps self-hosted agent (Phase 4)
-- [ ] Azure DevOps pipeline: `plan` on pull request, approval before `apply` (Phase 5)
+- [x] Azure DevOps pipeline: `plan` on pull request, approval before `apply`, managed-identity auth (Phase 5)
 - [ ] Prod spoke (`envs/prod`, 10.20.0.0/16)

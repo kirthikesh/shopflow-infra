@@ -1,0 +1,39 @@
+# Applies a saved plan from the Plan stage. Runs as a deployment job, so it waits
+# for the approval configured on the environment before doing anything.
+parameters:
+  - name: layer
+    type: string
+  - name: name
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+  - name: condition
+    type: string
+
+jobs:
+  - deployment: apply_${{ parameters.name }}
+    displayName: Apply ${{ parameters.layer }}
+    dependsOn: ${{ parameters.dependsOn }}
+    condition: ${{ parameters.condition }}
+    environment: shopflow-infra
+    workspace:
+      clean: all
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - checkout: self
+              clean: true
+            - download: current
+              artifact: tfplan-${{ parameters.name }}
+              displayName: Download saved plan
+            - template: azure-login.yml
+            - template: terraform-init.yml
+              parameters:
+                layer: ${{ parameters.layer }}
+            - bash: |
+                set -euo pipefail
+                terraform -chdir=${{ parameters.layer }} apply -input=false -lock-timeout=5m \
+                  "$(Pipeline.Workspace)/tfplan-${{ parameters.name }}/tfplan"
+              displayName: terraform apply (${{ parameters.layer }})

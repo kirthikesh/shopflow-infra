@@ -1,0 +1,16 @@
+# Accepted findings from `trivy config`, each with the reason. The pipeline fails
+# on any other HIGH or CRITICAL misconfiguration.
+misconfigurations:
+  - id: AZU-0012
+    paths: ["bootstrap/main.tf"]
+    statement: >-
+      State account network rules. The account has shared keys disabled and accepts
+      only Entra ID tokens with an RBAC role, so the endpoint alone grants nothing.
+      Restricting it to private access would lock out the laptop that bootstraps it.
+
+  - id: AZU-0013
+    paths: ["modules/key-vault/main.tf"]
+    statement: >-
+      Key Vault firewall. Default action is Deny when enable_private_endpoints = true;
+      dev keeps it Allow until the cluster reads secrets through the private endpoint.
+      Access still requires Entra ID and an RBAC role.

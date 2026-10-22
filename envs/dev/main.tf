@@ -76,6 +76,7 @@ module "key_vault" {
   private_dns_zone_id        = local.platform.private_dns_zone_ids.key_vault
   log_analytics_workspace_id = local.platform.log_analytics_workspace_id
   enable_diagnostics         = true
+  admin_object_ids           = var.admin_object_ids
   tags                       = local.tags
 }
 
@@ -92,6 +93,7 @@ module "aks" {
   node_vm_size                    = var.aks_node_vm_size
   api_server_private              = var.aks_api_server_private
   api_server_authorized_ip_ranges = var.aks_api_server_authorized_ip_ranges
+  admin_object_ids                = var.admin_object_ids
   acr_id                          = local.platform.acr_id
   log_analytics_workspace_id      = local.platform.log_analytics_workspace_id
   tags                            = local.tags

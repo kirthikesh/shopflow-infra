@@ -9,9 +9,9 @@ SHELL := /bin/bash
 # AzureRM 4+ needs the subscription ID explicitly; take it from your `az login`.
 export ARM_SUBSCRIPTION_ID ?= $(shell az account show --query id -o tsv 2>/dev/null)
 
-# Your public IP, so only you can reach the AKS API server while it's public.
+# Your public IP: SSH to the jump box is allowed from here only.
+# (The AKS API allow-list and cluster admins come from scripts/access-vars.sh.)
 MY_IP := $(shell curl -s --max-time 5 https://api.ipify.org)
-export TF_VAR_aks_api_server_authorized_ip_ranges := ["$(MY_IP)/32"]
 
 # Jump box: your SSH public key and the CIDR SSH is allowed from.
 SSH_PUBKEY_FILE := $(firstword $(wildcard $(HOME)/.ssh/id_ed25519.pub $(HOME)/.ssh/id_rsa.pub))
@@ -19,12 +19,14 @@ export TF_VAR_admin_ip_cidrs := ["$(MY_IP)/32"]
 
 BACKEND    := $(CURDIR)/generated/backend.hcl
 STATE_VARS := $(CURDIR)/generated/state.tfvars.json
+ACCESS_VARS := $(CURDIR)/generated/access.tfvars.json
+DEV_VARS   := -var-file=$(STATE_VARS) -var-file=$(ACCESS_VARS)
 TF_DIRS    := bootstrap platform envs/dev management
 
 .PHONY: help check bootstrap \
         platform-init platform-plan platform-apply platform-destroy \
         dev-init dev-plan dev-apply dev-destroy \
-        aks-up aks-down aks-creds \
+        access-vars aks-up aks-down aks-creds \
         jumpbox-init jumpbox-up jumpbox-down jumpbox-ssh ansible \
         up down fmt validate
 
@@ -63,24 +65,27 @@ platform-destroy: platform-init ## Destroy the platform layer (destroy dev first
 
 # ---- dev environment (spoke VNet, Key Vault) ----------------------------
 
-dev-init: check $(BACKEND) ## Initialise the dev layer
+dev-init: check $(BACKEND) access-vars ## Initialise the dev layer
 	terraform -chdir=envs/dev init -upgrade -backend-config=$(BACKEND)
 
+access-vars: ## Work out the AKS API allow-list and cluster admins (you + pipeline agent)
+	@./scripts/access-vars.sh
+
 dev-plan: dev-init ## Preview dev changes
-	terraform -chdir=envs/dev plan -var-file=$(STATE_VARS)
+	terraform -chdir=envs/dev plan $(DEV_VARS)
 
 dev-apply: dev-init ## Create or update the dev environment
-	terraform -chdir=envs/dev apply -var-file=$(STATE_VARS)
+	terraform -chdir=envs/dev apply $(DEV_VARS)
 
 dev-destroy: dev-init ## Destroy the dev environment
-	terraform -chdir=envs/dev destroy -var-file=$(STATE_VARS)
+	terraform -chdir=envs/dev destroy $(DEV_VARS)
 
 # ---- AKS on/off (the expensive part) -----------------------------------
 
 aks-up: dev-apply ## Create AKS and Service Bus (part of the dev layer)
 
 aks-down: dev-init ## Delete only AKS and Service Bus; keep network, Key Vault, ACR
-	terraform -chdir=envs/dev apply -var-file=$(STATE_VARS) -var aks_enabled=false
+	terraform -chdir=envs/dev apply $(DEV_VARS) -var aks_enabled=false
 
 aks-creds: ## Point kubectl at the cluster (Entra ID login via kubelogin)
 	@name=$$(terraform -chdir=envs/dev output -raw aks_name) && \

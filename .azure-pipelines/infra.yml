@@ -1,0 +1,183 @@
+# ShopFlow infrastructure pipeline.
+#
+#   Pull request  ->  Validate + Plan. The plan shows on the run's Summary tab.
+#   main          ->  Validate + Plan  ->  approval  ->  Apply the saved plans.
+#
+# Runs on the self-hosted agent inside the hub network and authenticates to Azure
+# with the agent VM's managed identity: no service principal, no secret.
+#
+# Layers covered: platform and envs/dev. Not covered, on purpose:
+#   bootstrap   holds the state account itself (chicken and egg)
+#   management  holds the agent VM; a pipeline shouldn't be able to destroy its own runner
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include: [platform, envs, modules, scripts, .azure-pipelines]
+
+pr:
+  branches:
+    include: [main]
+  paths:
+    include: [platform, envs, modules, scripts, .azure-pipelines]
+
+parameters:
+  - name: aks
+    displayName: AKS cluster and Service Bus
+    type: string
+    default: keep
+    values:
+      - keep  # leave them as they are now (on or off)
+      - on    # create them
+      - off   # remove them to save money
+
+pool:
+  name: Default
+
+variables:
+  # Library > Variable groups > shopflow-infra:
+  #   STATE_STORAGE_ACCOUNT, BUDGET_EMAIL, OWNER_OBJECT_ID, ADMIN_IP
+  - group: shopflow-infra
+  - name: stateResourceGroup
+    value: rg-shopflow-tfstate-neu
+  - name: devResourceGroup
+    value: rg-shopflow-dev-neu
+  - name: TF_IN_AUTOMATION
+    value: "true"
+
+stages:
+  # ---------------------------------------------------------------------------
+  - stage: Validate
+    jobs:
+      - job: validate
+        displayName: Format, validate, lint, scan
+        workspace:
+          clean: all
+        steps:
+          - checkout: self
+            clean: true
+
+          - bash: |
+              set -euo pipefail
+              terraform fmt -check -recursive -diff
+              for d in bootstrap platform envs/dev management; do
+                echo "== $d"
+                terraform -chdir=$d init -backend=false -input=false >/dev/null
+                terraform -chdir=$d validate
+              done
+            displayName: terraform fmt and validate
+
+          - bash: |
+              set -euo pipefail
+              venv="$HOME/.venvs/ansible-lint"
+              [ -x "$venv/bin/ansible-lint" ] || {
+                python3 -m venv "$venv"
+                "$venv/bin/pip" install --quiet ansible ansible-lint
+              }
+              cd ansible && "$venv/bin/ansible-lint" --profile production
+            displayName: ansible-lint (production profile)
+
+          # Misconfiguration scan of Terraform and Ansible. HIGH and CRITICAL
+          # findings fail the build; accepted risks are listed with reasons in
+          # .trivyignore.yaml.
+          - bash: |
+              set -euo pipefail
+              junit=$(dpkg -L trivy | grep 'junit.tpl$')
+              trivy config --quiet --ignorefile .trivyignore.yaml \
+                --format template --template "@$junit" \
+                --output "$(Agent.TempDirectory)/trivy-iac.xml" .
+              trivy config --quiet --ignorefile .trivyignore.yaml \
+                --severity HIGH,CRITICAL --exit-code 1 .
+            displayName: Trivy IaC scan
+
+          - task: PublishTestResults@2
+            displayName: Publish scan results
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: $(Agent.TempDirectory)/trivy-iac.xml
+              testRunTitle: Trivy IaC scan
+              failTaskOnFailedTests: false
+
+  # ---------------------------------------------------------------------------
+  - stage: Plan
+    dependsOn: Validate
+    jobs:
+      - job: plan_platform
+        displayName: Plan platform
+        workspace:
+          clean: all
+        steps:
+          - checkout: self
+            clean: true
+          - template: templates/azure-login.yml
+          - template: templates/terraform-plan.yml
+            parameters:
+              layer: platform
+              name: platform
+              varArgs: -var 'budget_contact_emails=["$(BUDGET_EMAIL)"]'
+
+      - job: plan_dev
+        displayName: Plan dev
+        dependsOn: plan_platform
+        workspace:
+          clean: all
+        steps:
+          - checkout: self
+            clean: true
+          - template: templates/azure-login.yml
+
+          - bash: |
+              set -euo pipefail
+              mkdir -p generated
+              printf '{"state_backend":{"resource_group_name":"%s","storage_account_name":"%s","container_name":"tfstate"}}\n' \
+                "$(stateResourceGroup)" "$(STATE_STORAGE_ACCOUNT)" > generated/state.tfvars.json
+
+              # Same script as `make dev-plan`, so laptop and pipeline agree on
+              # who can reach and administer the cluster.
+              OWNER_OBJECT_ID="$(OWNER_OBJECT_ID)" PIPELINE_OBJECT_ID="$(AGENT_OBJECT_ID)" \
+                ADMIN_IP="$(ADMIN_IP)" ./scripts/access-vars.sh
+
+              case "${{ parameters.aks }}" in
+                on)  aks=true ;;
+                off) aks=false ;;
+                keep)
+                  n=$(az aks list -g "$(devResourceGroup)" --query 'length(@)' -o tsv 2>/dev/null || echo 0)
+                  [ "${n:-0}" -gt 0 ] && aks=true || aks=false ;;
+              esac
+              echo "AKS and Service Bus: $aks (${{ parameters.aks }})"
+              echo "##vso[task.setvariable variable=aksEnabled]$aks"
+            displayName: Prepare variables
+
+          - template: templates/terraform-plan.yml
+            parameters:
+              layer: envs/dev
+              name: dev
+              varArgs: >-
+                -var-file=../../generated/state.tfvars.json
+                -var-file=../../generated/access.tfvars.json
+                -var aks_enabled=$(aksEnabled)
+
+  # ---------------------------------------------------------------------------
+  # Only on main, never for pull requests. Each apply waits for approval on the
+  # shopflow-infra environment, and is skipped when its plan has no changes.
+  - stage: Apply
+    dependsOn: Plan
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'PullRequest'))
+    variables:
+      platformChanges: $[ stageDependencies.Plan.plan_platform.outputs['plan.changes'] ]
+      devChanges: $[ stageDependencies.Plan.plan_dev.outputs['plan.changes'] ]
+    jobs:
+      - template: templates/terraform-apply.yml
+        parameters:
+          layer: platform
+          name: platform
+          condition: and(succeeded(), eq(variables.platformChanges, 'true'))
+
+      - template: templates/terraform-apply.yml
+        parameters:
+          layer: envs/dev
+          name: dev
+          dependsOn: [apply_platform]
+          condition: and(in(dependencies.apply_platform.result, 'Succeeded', 'Skipped'), eq(variables.devChanges, 'true'))

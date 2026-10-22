@@ -124,9 +124,18 @@ resource "azurerm_role_assignment" "acr_pull" {
   skip_service_principal_aad_check = true
 }
 
-# Whoever runs Terraform gets cluster-admin through Entra ID (there is no local admin).
-resource "azurerm_role_assignment" "deployer_cluster_admin" {
+# Cluster admins through Entra ID (there is no local admin account). Keyed by role
+# ("owner", "pipeline"), not by whoever runs Terraform, so a laptop apply and a
+# pipeline apply produce the same assignments instead of swapping them back and forth.
+resource "azurerm_role_assignment" "cluster_admin" {
+  for_each = var.admin_object_ids
+
   scope                = azurerm_kubernetes_cluster.this.id
   role_definition_name = "Azure Kubernetes Service RBAC Cluster Admin"
-  principal_id         = data.azurerm_client_config.current.object_id
+  principal_id         = each.value
+}
+
+moved {
+  from = azurerm_role_assignment.deployer_cluster_admin
+  to   = azurerm_role_assignment.cluster_admin["owner"]
 }

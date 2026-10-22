@@ -1,0 +1,45 @@
+# Plans one layer and publishes the saved plan, so the apply stage runs exactly
+# what was reviewed. Sets the output variable plan.changes (true/false).
+parameters:
+  - name: layer
+    type: string
+  - name: name
+    type: string
+  - name: varArgs
+    type: string
+    default: ""
+
+steps:
+  - template: terraform-init.yml
+    parameters:
+      layer: ${{ parameters.layer }}
+
+  - bash: |
+      set -uo pipefail
+      cd "${{ parameters.layer }}"
+      terraform plan -input=false -lock-timeout=5m -detailed-exitcode -out=tfplan ${{ parameters.varArgs }}
+      code=$?
+      [ "$code" -eq 1 ] && exit 1
+      [ "$code" -eq 2 ] && changes=true || changes=false
+      echo "##vso[task.setvariable variable=changes;isOutput=true]$changes"
+
+      # Readable summary on the run's Summary tab.
+      terraform show -no-color tfplan > plan.txt
+      {
+        echo "### ${{ parameters.name }}: $(grep -E '^(Plan:|No changes)' plan.txt | head -1)"
+        echo
+        echo '```'
+        grep -E '^  # ' plan.txt || echo "  (nothing to change)"
+        echo '```'
+      } > "$(Agent.TempDirectory)/plan-${{ parameters.name }}.md"
+      echo "##vso[task.uploadsummary]$(Agent.TempDirectory)/plan-${{ parameters.name }}.md"
+      exit 0
+    name: plan
+    displayName: terraform plan (${{ parameters.layer }})
+
+  # The plan holds resolved values, some sensitive. Pipeline artifacts are
+  # private to the project and expire with the run's retention policy.
+  - publish: ${{ parameters.layer }}/tfplan
+    artifact: tfplan-${{ parameters.name }}
+    displayName: Publish saved plan
+    condition: and(succeeded(), eq(variables['plan.changes'], 'true'))

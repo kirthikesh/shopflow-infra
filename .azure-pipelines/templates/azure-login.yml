@@ -1,0 +1,20 @@
+# Signs in as the agent VM's managed identity. No secrets are stored anywhere:
+# Azure DevOps holds no Azure credential, and the identity only exists on this VM.
+# Sets ARM_* variables so later Terraform steps in the same job use the same identity.
+steps:
+  - bash: |
+      set -euo pipefail
+      az login --identity --output none
+      sub=$(az account show --query id -o tsv)
+      tenant=$(az account show --query tenantId -o tsv)
+      # The identity can't look itself up in Entra ID, so read its object ID from its own token.
+      oid=$(az account get-access-token --query accessToken -o tsv | python3 -c '
+      import base64, json, sys
+      p = sys.stdin.read().split(".")[1]
+      print(json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))["oid"])')
+      echo "##vso[task.setvariable variable=ARM_SUBSCRIPTION_ID]$sub"
+      echo "##vso[task.setvariable variable=ARM_TENANT_ID]$tenant"
+      echo "##vso[task.setvariable variable=ARM_USE_MSI]true"
+      echo "##vso[task.setvariable variable=AGENT_OBJECT_ID]$oid"
+      echo "Signed in as the agent's managed identity ($oid)"
+    displayName: Azure sign-in (managed identity)

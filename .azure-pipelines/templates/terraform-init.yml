@@ -1,0 +1,14 @@
+# terraform init against the shared state account, authenticating with Entra ID.
+parameters:
+  - name: layer
+    type: string
+
+steps:
+  - bash: |
+      set -euo pipefail
+      terraform -chdir=${{ parameters.layer }} init -input=false \
+        -backend-config="resource_group_name=$(stateResourceGroup)" \
+        -backend-config="storage_account_name=$(STATE_STORAGE_ACCOUNT)" \
+        -backend-config="container_name=tfstate" \
+        -backend-config="use_azuread_auth=true"
+    displayName: terraform init (${{ parameters.layer }})
