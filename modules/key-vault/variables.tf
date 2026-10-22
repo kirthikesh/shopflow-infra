@@ -41,6 +41,12 @@ variable "private_dns_zone_id" {
   default = null
 }
 
+variable "enable_diagnostics" {
+  description = "Send audit logs to log_analytics_workspace_id. A plain bool, so the count is known at plan time even when the workspace is created in the same apply."
+  type        = bool
+  default     = false
+}
+
 variable "log_analytics_workspace_id" {
   type    = string
   default = null

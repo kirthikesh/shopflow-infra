@@ -74,5 +74,6 @@ module "key_vault" {
   private_endpoint_subnet_id = module.spoke_network.subnet_ids.private_endpoints
   private_dns_zone_id        = local.platform.private_dns_zone_ids.key_vault
   log_analytics_workspace_id = local.platform.log_analytics_workspace_id
+  enable_diagnostics         = true
   tags                       = local.tags
 }

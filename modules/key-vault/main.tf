@@ -59,7 +59,7 @@ resource "azurerm_private_endpoint" "this" {
 
 # Every secret read or change is logged.
 resource "azurerm_monitor_diagnostic_setting" "this" {
-  count = var.log_analytics_workspace_id == null ? 0 : 1
+  count = var.enable_diagnostics ? 1 : 0
 
   name                       = "to-log-analytics"
   target_resource_id         = azurerm_key_vault.this.id

@@ -73,6 +73,7 @@ module "container_registry" {
   private_endpoint_subnet_id = module.hub_network.subnet_ids.private_endpoints
   private_dns_zone_id        = module.private_dns.zone_ids[local.private_dns_zones.acr]
   log_analytics_workspace_id = module.log_analytics.id
+  enable_diagnostics         = true
   tags                       = local.tags
 }
 
