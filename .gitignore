@@ -1,0 +1,21 @@
+# Terraform working files
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+
+# Variable files can hold personal values (emails, IPs). Commit the .example instead.
+*.tfvars
+!*.tfvars.example
+*.auto.tfvars.json
+
+# Written by the bootstrap layer
+generated/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
