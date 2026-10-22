@@ -114,6 +114,16 @@ The budget alert emails at 50%, 80% and 100% of the monthly amount, and when the
 - **Guardrails from day one.** A budget and region policy exist before any workload does.
 - **Tag policy in audit mode.** Azure creates some resource groups itself (Network Watcher, the AKS node group) without our tags, so denying untagged groups would break those.
 
+## Problems I hit, and how I fixed them
+
+| Problem | Cause | Fix |
+|---|---|---|
+| `AADSTS530035: Access has been blocked by security defaults` when Terraform read state | Security Defaults require MFA, and data-plane endpoints (Blob Storage, Key Vault) each need their own MFA-backed token | Re-authenticated per resource: `az login --scope https://storage.azure.com/.default`, and the same for `https://vault.azure.net` |
+| Key Vault create timed out after 12 minutes on `GetCertificateContacts` | The vault was created through ARM, but the provider's follow-up read goes to the vault's data plane, which had no valid token | Logged in with the Key Vault scope; Terraform replaced the half-created vault cleanly on the next apply |
+| `Invalid count argument` on diagnostic settings | `count = workspace_id == null ? 0 : 1` depends on an ID that only exists after apply | Replaced with an explicit `enable_diagnostics` boolean, which is known at plan time |
+| `private_dns_zone_name` not accepted on DNS zone links | AzureRM 5.x links zones by ID instead of name and resource group | Switched to `private_dns_zone_id`, caught by `terraform validate` before anything was deployed |
+| Apply looked frozen with no output | A fresh subscription registers each resource provider on first use, which takes minutes | Pre-registered providers with `az provider register --wait`, and declared them explicitly in each layer |
+
 ## Repository layout
 
 ```
