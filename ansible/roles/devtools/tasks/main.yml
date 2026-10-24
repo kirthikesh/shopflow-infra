@@ -35,6 +35,7 @@
       - docker-buildx
       - "trivy={{ devtools_trivy_version }}"
       - python3-venv # ansible-lint in the pipeline
+      - make # the app pipeline runs its tests through the Makefile
       - jq
     state: present
     update_cache: true
