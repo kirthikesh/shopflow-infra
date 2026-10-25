@@ -195,6 +195,10 @@ The budget alert emails at 50%, 80% and 100% of the monthly amount, and when the
 
 | Problem | Cause | Fix |
 |---|---|---|
+| First pipeline plan wanted to **delete the admin SSH rule** on the jump box | The hub NSG declared its rules inline, while the management layer adds one more as a separate resource; each platform apply would strip it | `ignore_changes = [security_rule]` on that NSG. Caught by reviewing the saved plan before approving |
+| Plan wanted to replace the Key Vault role and change the budget | The pipeline's variable group held placeholder text instead of real values | Fixed the values and re-ran; the approval gate stopped the bad plan from being applied |
+| App pipeline: `Bash exited with code 127` | `make` isn't in Ubuntu's cloud image, and the agent runs tests through the Makefile | Added `make` to the Ansible `devtools` role |
+| Pods stuck `Pending`: **Insufficient cpu** | One 2-vCPU node was 97% reserved by AKS system pods plus ours, and the autoscaler couldn't add a node: the 4-vCPU quota for that VM family is shared with the jump box | Right-sized CPU requests (460m to 215m in total); dev rollouts replace pods one at a time (`maxSurge: 0`) so an update never needs spare room |
 | Ansible: `'timezone' is undefined` | `group_vars/` sat in the project root; Ansible only loads it next to the inventory or playbook (ansible-lint doesn't catch this) | Moved it to `ansible/inventory/group_vars/` |
 | Azure DevOps API returned **203** with a sign-in page | `uri` with `user: ""` silently skips Basic auth, so the PAT was never sent | Built the `Authorization: Basic` header explicitly; isolated it by testing the token with `curl` first (200) |
 | Azure DevOps sign-in kept failing (404/500) | Browser session confusion with a personal Microsoft account across directories | Created the organisation from a clean Incognito session |
