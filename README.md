@@ -48,7 +48,7 @@ Each layer has its own state file, so a change to dev can never touch shared res
 |---|---|---|
 | `bootstrap/` | local | Storage account for remote state: Entra ID auth only, versioning, soft delete, delete lock |
 | `platform/` | `platform.tfstate` | Hub VNet and NSGs, private DNS zones, ACR, Log Analytics, budget alerts, policy assignments |
-| `envs/dev/` | `envs/dev.tfstate` | Spoke VNet peered to the hub, DNS links, Key Vault, AKS and Service Bus (switchable) |
+| `envs/dev/` | `envs/dev.tfstate` | Spoke VNet peered to the hub, DNS links, Key Vault, AKS, and one Service Bus namespace per app environment (dev, prod). AKS and Service Bus are switchable |
 | `management/` | `management.tfstate` | Jump box / pipeline agent VM in the hub, and the agent identity's Azure roles |
 
 `envs/dev` reads the platform layer's outputs through `terraform_remote_state`, so nothing is copied by hand.
@@ -195,6 +195,7 @@ The budget alert emails at 50%, 80% and 100% of the monthly amount, and when the
 
 | Problem | Cause | Fix |
 |---|---|---|
+| `kubectl` timed out connecting to AKS | Home IP changed, and the API server only accepts the IPs on its allow-list | `az aks update --api-server-authorized-ip-ranges` with the new IP, and updated `ADMIN_IP` in the pipeline's variable group |
 | First pipeline plan wanted to **delete the admin SSH rule** on the jump box | The hub NSG declared its rules inline, while the management layer adds one more as a separate resource; each platform apply would strip it | `ignore_changes = [security_rule]` on that NSG. Caught by reviewing the saved plan before approving |
 | Plan wanted to replace the Key Vault role and change the budget | The pipeline's variable group held placeholder text instead of real values | Fixed the values and re-ran; the approval gate stopped the bad plan from being applied |
 | App pipeline: `Bash exited with code 127` | `make` isn't in Ubuntu's cloud image, and the agent runs tests through the Makefile | Added `make` to the Ansible `devtools` role |
@@ -249,4 +250,5 @@ shopflow-infra/
 - [ ] Make the AKS API fully private once the jump box exists (Phase 4)
 - [x] Ansible-managed jump box and Azure DevOps self-hosted agent (Phase 4)
 - [x] Azure DevOps pipeline: `plan` on pull request, approval before `apply`, managed-identity auth (Phase 5)
+- [x] GitOps with Argo CD: dev and prod on one cluster, separate Service Bus per environment (Phase 6, see [shopflow-gitops](https://github.com/kirthikesh/shopflow-gitops))
 - [ ] Prod spoke (`envs/prod`, 10.20.0.0/16)
