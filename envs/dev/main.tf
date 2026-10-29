@@ -99,12 +99,20 @@ module "aks" {
   tags                            = local.tags
 }
 
+# One Service Bus namespace per app environment running on this cluster.
+# Separate namespaces, not separate queues: dev and prod can never consume each
+# other's messages, and each gets its own connection string.
 module "service_bus" {
-  source = "../../modules/service-bus"
-  count  = var.aks_enabled ? 1 : 0
+  source   = "../../modules/service-bus"
+  for_each = var.aks_enabled ? toset(var.app_environments) : toset([])
 
-  name                = "sb-${local.name_prefix}-${var.environment}-${random_string.suffix.result}"
+  name                = "sb-${local.name_prefix}-${each.key}-${random_string.suffix.result}"
   location            = local.location
   resource_group_name = azurerm_resource_group.env.name
-  tags                = local.tags
+  tags                = merge(local.tags, { app_env = each.key })
+}
+
+moved {
+  from = module.service_bus[0]
+  to   = module.service_bus["dev"]
 }

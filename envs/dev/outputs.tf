@@ -30,11 +30,19 @@ output "acr_login_server" {
   value = local.platform.acr_login_server
 }
 
-output "servicebus_namespace" {
-  value = one(module.service_bus[*].namespace_name)
+output "servicebus_namespaces" {
+  description = "Service Bus namespace per app environment."
+  value       = { for env, sb in module.service_bus : env => sb.namespace_name }
 }
 
+output "servicebus_connection_strings" {
+  description = "App connection string per app environment."
+  value       = { for env, sb in module.service_bus : env => sb.app_connection_string }
+  sensitive   = true
+}
+
+# Kept for `make deploy` in shopflow-app, which deploys dev only.
 output "servicebus_connection_string" {
-  value     = one(module.service_bus[*].app_connection_string)
+  value     = try(module.service_bus["dev"].app_connection_string, null)
   sensitive = true
 }

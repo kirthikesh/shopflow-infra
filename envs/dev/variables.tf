@@ -67,3 +67,9 @@ variable "state_backend" {
     container_name       = string
   })
 }
+
+variable "app_environments" {
+  description = "App environments deployed to this cluster by Argo CD. Each gets its own Service Bus namespace."
+  type        = list(string)
+  default     = ["dev", "prod"]
+}
