@@ -12,7 +12,7 @@ an event-driven microservices store. Hub-and-spoke networking, private DNS, a co
 centralised logging, and cost and policy guardrails, built as small reusable modules in separate,
 independently deployable layers.
 
-> **Status:** Phases 2–5 done: landing zone, AKS and Service Bus, an Ansible-managed build agent, and Azure DevOps pipelines that plan on pull requests and apply after approval. `make aks-down` / `make aks-up` switch the paid compute off and on.
+> **Status:** Phases 2–6 done: landing zone, AKS and Service Bus, an Ansible-managed build agent, Azure DevOps pipelines that plan on pull requests and apply after approval, and GitOps on top. `make aks-down` / `make aks-up` switch the paid compute off and on. The environment is torn down to save cost; `make bootstrap && make up` rebuilds it.
 
 ---
 
@@ -127,6 +127,8 @@ flowchart LR
     P -->|main only| A{Approval<br/>shopflow-infra}
     A --> AP[Apply platform] --> AD[Apply dev]
 ```
+
+![Infra pipeline: validate, plan, then apply after approval](docs/images/infra-pipeline.jpg)
 
 - **Pull requests only plan.** The plan for each layer appears on the run's Summary tab.
 - **Apply runs the saved plan**, so what gets applied is exactly what was approved. A layer with no changes skips its apply and never asks for approval.
