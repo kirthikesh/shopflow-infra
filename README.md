@@ -1,5 +1,7 @@
 # shopflow-infra
 
+> **Moved:** ShopFlow is now one repository: [kirthikesh/shopflow](https://github.com/kirthikesh/shopflow) (this code is in its `infra/` folder, history included). This repository is archived.
+
 ![Terraform](https://img.shields.io/badge/Terraform-1.9+-111?style=flat-square&logo=terraform&logoColor=white)
 ![AzureRM](https://img.shields.io/badge/AzureRM-5.x-111?style=flat-square&logo=microsoftazure&logoColor=white)
 ![Region](https://img.shields.io/badge/Region-North_Europe-111?style=flat-square)
